@@ -1,0 +1,73 @@
+# Locize Backup Container with locize-cli
+# Uses ligouras/locize-cli with version pinning for enhanced functionality
+
+# Build arguments for version pinning and metadata
+ARG LOCIZE_CLI_VERSION=10.3.1
+ARG BUILD_DATE
+ARG VCS_REF
+ARG VERSION=10.3.1
+
+FROM ligouras/locize-cli:${LOCIZE_CLI_VERSION}
+
+# Set OCI-compliant metadata labels
+LABEL org.opencontainers.image.title="locize-backup"
+LABEL org.opencontainers.image.description="Locize i18n backup script using locize-cli for Kubernetes environments"
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+LABEL org.opencontainers.image.revision="${VCS_REF}"
+LABEL org.opencontainers.image.source="https://github.com/ligouras/locize-backup-docker"
+LABEL org.opencontainers.image.url="https://github.com/ligouras/locize-backup-docker"
+LABEL org.opencontainers.image.documentation="https://github.com/ligouras/locize-backup-docker#readme"
+LABEL org.opencontainers.image.vendor="ligouras"
+LABEL org.opencontainers.image.licenses="MIT"
+LABEL maintainer="locize-backup"
+
+# Switch to root temporarily to install additional dependencies
+USER root
+
+# Install additional runtime dependencies for backup functionality
+RUN apk add --no-cache \
+    bash \
+    jq \
+    aws-cli \
+    bc \
+    ca-certificates \
+    tzdata \
+    curl \
+    && rm -rf /var/cache/apk/*
+
+# Create backup-specific directories and ensure proper ownership
+RUN mkdir -p /app/backup /tmp/locize-backup && \
+    chown -R locize:nodejs /app/backup /tmp/locize-backup
+
+# Copy the enhanced backup script
+COPY --chown=locize:nodejs backup-locize.sh /app/backup/
+COPY --chown=locize:nodejs .env.example /app/backup/
+
+# Make script executable
+RUN chmod +x /app/backup/backup-locize.sh
+
+# Set working directory for backup operations
+WORKDIR /app/backup
+
+# Switch back to non-root user for security
+USER locize
+
+# Set default environment variables for backup functionality
+ENV BACKUP_DIR=/tmp/locize-backup
+ENV LOG_LEVEL=INFO
+ENV CLEANUP_LOCAL_FILES=true
+ENV MAX_RETRIES=3
+ENV RETRY_DELAY=5
+ENV RATE_LIMIT_DELAY=1
+ENV LOCIZE_CLI_TIMEOUT=30
+
+# Health check - verify locize-cli and backup script are accessible
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD locize --version && test -x /app/backup/backup-locize.sh || exit 1
+
+# Override entrypoint to use backup script by default
+ENTRYPOINT ["/app/backup/backup-locize.sh"]
+
+# Default command (can be overridden)
+CMD []
