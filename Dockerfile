@@ -41,11 +41,11 @@ RUN mkdir -p /app/backup /tmp/locize-backup && \
     chown -R locize:nodejs /app/backup /tmp/locize-backup
 
 # Copy the enhanced backup script
-COPY --chown=locize:nodejs backup-locize.sh /app/backup/
+COPY --chown=locize:nodejs backup.sh /app/backup/
 COPY --chown=locize:nodejs .env.example /app/backup/
 
 # Make script executable
-RUN chmod +x /app/backup/backup-locize.sh
+RUN chmod +x /app/backup/backup.sh
 
 # Set working directory for backup operations
 WORKDIR /app/backup
@@ -64,10 +64,10 @@ ENV LOCIZE_CLI_TIMEOUT=30
 
 # Health check - verify locize-cli and backup script are accessible
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD locize --version && test -x /app/backup/backup-locize.sh || exit 1
+    CMD locize --version && test -x /app/backup/backup.sh || exit 1
 
 # Override entrypoint to use backup script by default
-ENTRYPOINT ["/app/backup/backup-locize.sh"]
+ENTRYPOINT ["/app/backup/backup.sh"]
 
 # Default command (can be overridden)
 CMD []
