@@ -10,6 +10,10 @@
 .env.production
 .env.staging
 
+# Committed environment files (ignore future changes)
+.env.minio
+.env.local
+
 # AWS credentials and configuration
 .aws/
 aws-credentials
