@@ -2,9 +2,9 @@
 # Environment and Configuration Files
 # =============================================================================
 
-# Environment files (keep .env.example as template)
+# Environment files (keep templates for testing)
 .env
-.env.local
+.env.s3
 .env.development
 .env.test
 .env.production

@@ -1,0 +1,88 @@
+{
+  "name": "locize-backup-docker",
+  "version": "10.3.1",
+  "description": "Docker image for locize backup solution - Automated backup of locize translation files to S3 using locize-cli",
+  "main": "backup.sh",
+  "scripts": {
+    "build": "DOCKER_BUILDKIT=1 docker build --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') --build-arg VCS_REF=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') --build-arg VERSION=$(cat .locize-cli-version 2>/dev/null || echo '10.3.1') --build-arg LOCIZE_CLI_VERSION=$(cat .locize-cli-version 2>/dev/null || echo '10.3.1') --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') --label org.opencontainers.image.version=$(cat .locize-cli-version 2>/dev/null || echo '10.3.1') --label org.opencontainers.image.source=https://github.com/ligouras/locize --label org.opencontainers.image.title='Locize Backup' --label 'org.opencontainers.image.description=Backup solution for Locize i18n files using locize-cli' -t ligouras/locize-backup:latest -t ligouras/locize-backup:$(cat .locize-cli-version 2>/dev/null || echo '10.3.1') .",
+    "build:multi": "DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64,linux/arm64 --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') --build-arg VCS_REF=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') --build-arg VERSION=$(cat .locize-cli-version 2>/dev/null || echo '10.3.1') --build-arg LOCIZE_CLI_VERSION=$(cat .locize-cli-version 2>/dev/null || echo '10.3.1') --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') --label org.opencontainers.image.version=$(cat .locize-cli-version 2>/dev/null || echo '10.3.1') --label org.opencontainers.image.source=https://github.com/ligouras/locize --label org.opencontainers.image.title='Locize Backup' --label 'org.opencontainers.image.description=Backup solution for Locize i18n files using locize-cli' -t ligouras/locize-backup:latest -t ligouras/locize-backup:$(cat .locize-cli-version 2>/dev/null || echo '10.3.1') .",
+    "build:push": "npm run build && docker push ligouras/locize-backup:latest && docker push ligouras/locize-backup:$(cat .locize-cli-version 2>/dev/null || echo '10.3.1')",
+    "build:force": "DOCKER_BUILDKIT=1 docker build --no-cache --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') --build-arg VCS_REF=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown') --build-arg VERSION=$(cat .locize-cli-version 2>/dev/null || echo '10.3.1') --build-arg LOCIZE_CLI_VERSION=$(cat .locize-cli-version 2>/dev/null || echo '10.3.1') --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') --label org.opencontainers.image.version=$(cat .locize-cli-version 2>/dev/null || echo '10.3.1') --label org.opencontainers.image.source=https://github.com/ligouras/locize --label org.opencontainers.image.title='Locize Backup' --label 'org.opencontainers.image.description=Backup solution for Locize i18n files using locize-cli' -t ligouras/locize-backup:latest -t ligouras/locize-backup:$(cat .locize-cli-version 2>/dev/null || echo '10.3.1') .",
+    "run": "docker run --rm -it ligouras/locize-backup",
+    "run:env": "docker run --rm --env-file .env ligouras/locize-backup",
+    "shell": "docker run --rm -it --entrypoint bash ligouras/locize-backup",
+    "test": "./tests/integration/test-backup-functionality.sh",
+    "test:local": "docker-compose run --rm --env-file .env.local -v $(pwd)/backup-data:/app/backup/data locize-backup",
+    "test:minio": "npm run minio:start && sleep 5 && docker-compose run --rm --env-file .env.minio locize-backup",
+    "test:smoke": "npm run build && docker run --rm --entrypoint locize ligouras/locize-backup --version",
+    "lint": "docker run --rm -i hadolint/hadolint < Dockerfile || echo 'Hadolint not available' && find . -name '*.sh' -exec shellcheck {} + || echo 'Shellcheck not available'",
+    "clean": "docker rmi ligouras/locize-backup || true && docker system prune -f",
+    "dev": "docker-compose up --build",
+    "minio:start": "docker-compose --profile testing up -d minio minio-setup",
+    "minio:stop": "docker-compose --profile testing down -v",
+    "version": "cat .locize-cli-version",
+    "help": "npm run | grep -E '^  [a-z]' | sort"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ligouras/locize.git",
+    "directory": "docker-backup"
+  },
+  "keywords": [
+    "locize",
+    "locize-cli",
+    "docker",
+    "backup",
+    "translation",
+    "i18n",
+    "internationalization",
+    "localization",
+    "s3",
+    "aws",
+    "automation",
+    "kubernetes",
+    "devops",
+    "containerization"
+  ],
+  "author": {
+    "name": "ligouras",
+    "url": "https://github.com/ligouras"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/ligouras/locize/tree/main/docker-backup#readme",
+  "bugs": {
+    "url": "https://github.com/ligouras/locize/issues"
+  },
+  "engines": {
+    "node": ">=14.0.0",
+    "docker": ">=20.0.0"
+  },
+  "devDependencies": {},
+  "dependencies": {},
+  "config": {
+    "docker": {
+      "image": "ligouras/locize-backup",
+      "baseImage": "ligouras/locize-cli",
+      "platforms": "linux/amd64,linux/arm64",
+      "registries": {
+        "dockerhub": "ligouras/locize-backup",
+        "ghcr": "ghcr.io/ligouras/locize-backup"
+      }
+    },
+    "backup": {
+      "defaultS3Prefix": "locize-backups",
+      "defaultRegion": "us-east-1",
+      "defaultLogLevel": "INFO"
+    }
+  },
+  "files": [
+    "Dockerfile",
+    "backup.sh",
+    "docker-compose.yml",
+    ".env.example",
+    ".dockerignore",
+    "README.md",
+    "DEPLOYMENT.md",
+    ".locize-cli-version"
+  ]
+}
