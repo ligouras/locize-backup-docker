@@ -1,0 +1,110 @@
+services:
+
+  locize-backup:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_DATE: ${BUILD_DATE:-}
+        VCS_REF: ${VCS_REF:-}
+        LOCIZE_CLI_VERSION: ${LOCIZE_CLI_VERSION:-10.3.1}
+    image: ligouras/locize-backup:${TAG:-10.3.1}
+    container_name: locize-backup-dev
+
+    # Additional environment variables for development
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - CLEANUP_LOCAL_FILES=${CLEANUP_LOCAL_FILES:-false}
+
+    # Volume mounts for local development and testing
+    volumes:
+      # Mount local backup directory for inspection
+      - ./backup-data:/app/backup/data
+      # Mount AWS credentials if not using IAM roles (only if S3 is used)
+      - ${HOME}/.aws:/home/locize/.aws:ro
+      # Mount the backup script for development (get latest code changes without rebuild)
+      - ./backup.sh:/app/backup/backup.sh:ro
+
+    # Resource limits for local testing
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "locize", "--version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    # Labels for organization
+    labels:
+      - "com.docker.compose.project=locize-backup"
+      - "com.docker.compose.service=backup"
+      - "maintainer=ligouras"
+      - "version=${LOCIZE_CLI_VERSION:-10.3.1}"
+
+  # Optional: MinIO for local S3 testing
+  minio:
+    image: minio/minio:latest
+    container_name: locize-backup-minio
+    profiles:
+      - testing
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    labels:
+      - "com.docker.compose.project=locize-backup"
+      - "com.docker.compose.service=minio"
+
+  # Optional: Create MinIO bucket for testing
+  minio-setup:
+    image: minio/mc:latest
+    container_name: locize-backup-minio-setup
+    profiles:
+      - testing
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set localminio http://minio:9000 minioadmin minioadmin123;
+      mc mb localminio/locize-backups-test --ignore-existing;
+      mc policy set public localminio/locize-backups-test;
+      echo 'MinIO bucket setup complete';
+      "
+    labels:
+      - "com.docker.compose.project=locize-backup"
+      - "com.docker.compose.service=minio-setup"
+
+volumes:
+  minio-data:
+    driver: local
+    labels:
+      - "com.docker.compose.project=locize-backup"
+
+networks:
+  default:
+    name: locize-backup-network
+    labels:
+      - "com.docker.compose.project=locize-backup"

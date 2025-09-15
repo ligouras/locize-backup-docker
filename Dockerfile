@@ -5,14 +5,13 @@
 ARG LOCIZE_CLI_VERSION=10.3.1
 ARG BUILD_DATE
 ARG VCS_REF
-ARG VERSION=10.3.1
 
 FROM ligouras/locize-cli:${LOCIZE_CLI_VERSION}
 
 # Set OCI-compliant metadata labels
 LABEL org.opencontainers.image.title="locize-backup"
 LABEL org.opencontainers.image.description="Locize i18n backup script using locize-cli for Kubernetes environments"
-LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.version="${LOCIZE_CLI_VERSION}"
 LABEL org.opencontainers.image.created="${BUILD_DATE}"
 LABEL org.opencontainers.image.revision="${VCS_REF}"
 LABEL org.opencontainers.image.source="https://github.com/ligouras/locize-backup-docker"
