@@ -6,9 +6,51 @@
 
 set -euo pipefail
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
+FORCE_BACKUP="false"
+
+# Parse command line arguments
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --force)
+                FORCE_BACKUP="true"
+                log_info "Force backup mode enabled"
+                shift
+                ;;
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            *)
+                log_error "Unknown argument: $1"
+                show_help
+                exit 1
+                ;;
+        esac
+    done
+}
+
+# Show help message
+show_help() {
+    cat << EOF
+Locize i18n Backup Script
+
+Usage: $0 [OPTIONS]
+
+OPTIONS:
+    --force     Force backup even if one was run within the last 24 hours
+    -h, --help  Show this help message
+
+DESCRIPTION:
+    This script downloads internationalization files using locize-cli and
+    optionally uploads them to S3. By default, it will exit if a backup
+    was already performed within the last 24 hours.
+
+EXAMPLES:
+    $0                # Run backup (skip if run within 24 hours)
+    $0 --force        # Force backup regardless of timing
+EOF
+}
 
 # Default configuration (can be overridden by environment variables)
 PROJECT_ID="${LOCIZE_PROJECT_ID:-9ad9654a-7325-49cf-bca2-141a262ef86a}"
@@ -32,13 +74,9 @@ if [[ -n "$S3_BUCKET" ]]; then
     USE_S3="true"
 fi
 
-# =============================================================================
-# LOGGING FUNCTIONS
-# =============================================================================
-
 # Color codes for log levels
 readonly RED='\033[0;31m'
-readonly YELLOW='\033[1;33m'
+readonly YELLOW='\033[0;33m'
 readonly GREEN='\033[0;32m'
 readonly BLUE='\033[0;34m'
 readonly CYAN='\033[0;36m'
@@ -81,10 +119,6 @@ log_warn() { log "WARN" "$@"; }
 log_success() { log "SUCCESS" "$@"; }
 log_info() { log "INFO" "$@"; }
 log_debug() { log "DEBUG" "$@"; }
-
-# =============================================================================
-# UTILITY FUNCTIONS
-# =============================================================================
 
 # Check if required tools are available
 check_dependencies() {
@@ -220,6 +254,90 @@ validate_json() {
 
     log_debug "JSON validation passed for: $file"
     return 0
+}
+
+# Check if backup was run within the last 24 hours
+check_last_backup_time() {
+    local summaries_dir="$BACKUP_DIR/summaries"
+
+    # If summaries directory doesn't exist, no previous backups
+    if [[ ! -d "$summaries_dir" ]]; then
+        log_debug "No summaries directory found, proceeding with backup"
+        return 0
+    fi
+
+    # Find the most recent summary file
+    local latest_summary
+    latest_summary=$(find "$summaries_dir" -name "backup-summary-*.json" -type f 2>/dev/null | sort -r | head -1)
+
+    if [[ -z "$latest_summary" || ! -f "$latest_summary" ]]; then
+        log_debug "No previous backup summaries found, proceeding with backup"
+        return 0
+    fi
+
+    log_debug "Found latest summary: $(basename "$latest_summary")"
+
+    # Extract timestamp from summary file
+    local last_backup_timestamp
+    if ! last_backup_timestamp=$(jq -r '.timestamp // empty' "$latest_summary" 2>/dev/null); then
+        log_warn "Could not parse timestamp from summary file, proceeding with backup"
+        return 0
+    fi
+
+    if [[ -z "$last_backup_timestamp" ]]; then
+        log_warn "No timestamp found in summary file, proceeding with backup"
+        return 0
+    fi
+
+    # Convert timestamp to epoch seconds (format: YYYYMMDD-HHMMSS)
+    local last_backup_date="${last_backup_timestamp:0:8}"
+    local last_backup_time="${last_backup_timestamp:9:6}"
+
+    # Reformat to YYYY-MM-DD HH:MM:SS for date parsing
+    local formatted_date="${last_backup_date:0:4}-${last_backup_date:4:2}-${last_backup_date:6:2}"
+    local formatted_time="${last_backup_time:0:2}:${last_backup_time:2:2}:${last_backup_time:4:2}"
+    local last_backup_epoch
+
+    # Try different date parsing methods for compatibility
+    if last_backup_epoch=$(date -d "$formatted_date $formatted_time UTC" +%s 2>/dev/null); then
+        log_debug "Successfully parsed timestamp using date -d"
+    elif last_backup_epoch=$(date -u -d "$formatted_date $formatted_time" +%s 2>/dev/null); then
+        log_debug "Successfully parsed timestamp using date -u -d"
+    elif last_backup_epoch=$(date -j -f "%Y-%m-%d %H:%M:%S" "$formatted_date $formatted_time" +%s 2>/dev/null); then
+        log_debug "Successfully parsed timestamp using date -j -f (BSD/macOS)"
+    else
+        log_warn "Could not parse backup timestamp: $last_backup_timestamp, proceeding with backup"
+        return 0
+    fi
+
+    # Get current time in epoch seconds
+    local current_epoch
+    current_epoch=$(date +%s)
+
+    # Calculate time difference in seconds (24 hours = 86400 seconds)
+    local time_diff=$((current_epoch - last_backup_epoch))
+    local hours_since_backup=$((time_diff / 3600))
+
+    log_debug "Last backup was $hours_since_backup hours ago"
+
+    # Check if less than 24 hours have passed
+    if [[ $time_diff -lt 86400 ]]; then
+        local remaining_hours=$((24 - hours_since_backup))
+        log_info "Last backup was performed $hours_since_backup hours ago (less than 24 hours)"
+
+        if [[ "$FORCE_BACKUP" == "true" ]]; then
+            log_info "Force mode enabled, proceeding with backup despite recent execution"
+            return 0
+        else
+            log_info "Backup already performed within the last 24 hours"
+            log_info "Next backup can be performed in approximately $remaining_hours hours"
+            log_info "Use --force flag to override this check"
+            exit 0
+        fi
+    else
+        log_info "Last backup was $hours_since_backup hours ago, proceeding with new backup"
+        return 0
+    fi
 }
 
 # Download namespace using locize-cli with retry logic
@@ -384,10 +502,6 @@ process_combination() {
     return 0
 }
 
-# =============================================================================
-# MAIN BACKUP FUNCTION
-# =============================================================================
-
 run_backup() {
     local timestamp=$(date -u '+%Y%m%d-%H%M%S')
     local daily_dir
@@ -525,10 +639,6 @@ EOF
     fi
 }
 
-# =============================================================================
-# SIGNAL HANDLERS
-# =============================================================================
-
 cleanup_on_exit() {
     local exit_code=$?
     log_info "Script exiting with code: $exit_code"
@@ -546,11 +656,10 @@ cleanup_on_exit() {
 trap cleanup_on_exit EXIT
 trap 'log_error "Script interrupted"; exit 130' INT TERM
 
-# =============================================================================
-# MAIN EXECUTION
-# =============================================================================
-
 main() {
+    # Parse command line arguments first
+    parse_arguments "$@"
+
     log_info "=== Locize Backup Script Started ==="
     log_info "Version: 1.0.0"
     log_info "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
@@ -558,6 +667,9 @@ main() {
     # Validate environment
     check_dependencies
     validate_config
+
+    # Check if backup was run recently (unless forced)
+    check_last_backup_time
 
     # Run backup
     run_backup
