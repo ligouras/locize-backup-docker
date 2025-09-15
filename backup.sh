@@ -332,7 +332,7 @@ check_last_backup_time() {
             log_info "Backup already performed within the last 24 hours"
             log_info "Next backup can be performed in approximately $remaining_hours hours"
             log_info "Use --force flag to override this check"
-            exit 0
+            return 1
         fi
     else
         log_info "Last backup was $hours_since_backup hours ago, proceeding with new backup"
@@ -434,7 +434,12 @@ upload_to_s3() {
         # Build AWS CLI command with optional endpoint URL for MinIO
         local aws_cmd=(aws s3 cp "$local_file" "s3://$S3_BUCKET/$s3_key")
         aws_cmd+=(--region "$AWS_REGION")
-        aws_cmd+=(--storage-class STANDARD_IA)
+
+        # Only add storage class for real AWS S3, not MinIO
+        if [[ -z "${AWS_ENDPOINT_URL:-}" ]]; then
+            aws_cmd+=(--storage-class STANDARD_IA)
+        fi
+
         aws_cmd+=(--metadata "source=locize-backup-cli,timestamp=$(date -u +%s),version=$VERSION")
         aws_cmd+=(--quiet)
 
@@ -639,6 +644,100 @@ EOF
     fi
 }
 
+# Upload existing backup files to S3
+upload_existing_backups() {
+    local summaries_dir="$BACKUP_DIR/summaries"
+
+    # Find the most recent summary file to get the timestamp
+    local latest_summary
+    latest_summary=$(find "$summaries_dir" -name "backup-summary-*.json" -type f 2>/dev/null | sort -r | head -1)
+
+    if [[ -z "$latest_summary" || ! -f "$latest_summary" ]]; then
+        log_error "No recent backup summary found - cannot determine which files to upload"
+        exit 1
+    fi
+
+    # Extract timestamp from summary filename
+    local timestamp
+    timestamp=$(basename "$latest_summary" | sed 's/backup-summary-\(.*\)\.json/\1/')
+
+    if [[ -z "$timestamp" ]]; then
+        log_error "Could not extract timestamp from summary file: $(basename "$latest_summary")"
+        exit 1
+    fi
+
+    log_info "Found recent backup with timestamp: $timestamp"
+
+    # Extract backup date from timestamp (format: YYYYMMDD-HHMMSS)
+    local backup_date="${timestamp:0:8}"
+    local formatted_date="${backup_date:0:4}/${backup_date:4:2}/${backup_date:6:2}"
+    local daily_dir="$BACKUP_DIR/$formatted_date"
+
+    if [[ ! -d "$daily_dir" ]]; then
+        log_error "Backup directory not found: $daily_dir"
+        exit 1
+    fi
+
+    log_info "Uploading existing backup files from: $daily_dir"
+
+    # Find all backup files with the matching timestamp
+    local backup_files
+    backup_files=$(find "$daily_dir" -name "i18n-*-$timestamp.json" -type f 2>/dev/null)
+
+    if [[ -z "$backup_files" ]]; then
+        log_error "No backup files found with timestamp: $timestamp"
+        exit 1
+    fi
+
+    local successful=0
+    local failed=0
+    local total=0
+
+    # Upload each backup file
+    while IFS= read -r local_file; do
+        if [[ -f "$local_file" ]]; then
+            local filename=$(basename "$local_file")
+            local s3_key="$formatted_date/$filename"
+
+            total=$((total + 1))
+            log_info "Uploading: $(basename "$local_file")"
+
+            if upload_to_s3 "$local_file" "$s3_key"; then
+                successful=$((successful + 1))
+                log_success "Successfully uploaded: $filename -> s3://$S3_BUCKET/$s3_key"
+            else
+                failed=$((failed + 1))
+                log_error "Failed to upload: $filename"
+            fi
+        fi
+    done <<< "$backup_files"
+
+    # Upload summary file if it exists locally
+    if [[ -f "$latest_summary" ]]; then
+        local summary_filename=$(basename "$latest_summary")
+        local s3_summary_key="summaries/$summary_filename"
+
+        log_info "Uploading summary file: $summary_filename"
+        if upload_to_s3 "$latest_summary" "$s3_summary_key"; then
+            log_success "Successfully uploaded summary: $summary_filename -> s3://$S3_BUCKET/$s3_summary_key"
+        else
+            log_warn "Failed to upload summary file"
+        fi
+    fi
+
+    # Report results
+    log_info "Upload process completed"
+    log_info "Total files: $total, Successful: $successful, Failed: $failed"
+
+    if [[ $failed -gt 0 ]]; then
+        log_error "Upload completed with failures"
+        exit 1
+    else
+        log_success "All existing backup files uploaded successfully"
+        exit 0
+    fi
+}
+
 cleanup_on_exit() {
     local exit_code=$?
     log_info "Script exiting with code: $exit_code"
@@ -669,10 +768,20 @@ main() {
     validate_config
 
     # Check if backup was run recently (unless forced)
-    check_last_backup_time
-
-    # Run backup
-    run_backup
+    if check_last_backup_time; then
+        # No recent backup found or force mode enabled, run new backup
+        run_backup
+    else
+        # Recent backup exists, proceed to upload process if S3 is configured
+        if [[ "$USE_S3" == "true" ]]; then
+            log_info "Proceeding to upload existing backup files to S3..."
+            upload_existing_backups
+        else
+            log_info "Local storage mode - backup files are already available locally"
+            log_info "Script completed successfully"
+            exit 0
+        fi
+    fi
 }
 
 # Execute main function if script is run directly

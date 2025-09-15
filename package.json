@@ -18,8 +18,8 @@
     "lint": "docker run --rm -i hadolint/hadolint < Dockerfile || echo 'Hadolint not available' && find . -name '*.sh' -exec shellcheck {} + || echo 'Shellcheck not available'",
     "clean": "docker rmi ligouras/locize-backup || true && docker system prune -f",
     "dev": "docker compose up --build",
-    "minio:start": "docker compose --profile testing up -d minio minio-setup",
-    "minio:stop": "docker compose --profile testing down -v",
+    "minio:start": "docker compose --env-file .env.minio --profile testing up -d minio minio-setup",
+    "minio:stop": "docker compose --env-file .env.minio --profile testing down -v",
     "version": "cat .locize-cli-version",
     "version:sync": "node scripts/update-version.js",
     "help": "npm run | grep -E '^  [a-z]' | sort"

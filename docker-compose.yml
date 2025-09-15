@@ -13,8 +13,27 @@ services:
 
     # Additional environment variables for development
     environment:
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # Locize Configuration
+      - LOCIZE_PROJECT_ID=${LOCIZE_PROJECT_ID}
+      - LOCIZE_API_KEY=${LOCIZE_API_KEY}
+      - LOCIZE_VERSION=${LOCIZE_VERSION:-latest}
+      - LOCIZE_LANGUAGES=${LOCIZE_LANGUAGES}
+      - LOCIZE_NAMESPACES=${LOCIZE_NAMESPACES}
+
+      # S3/MinIO Configuration
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_ENDPOINT_URL=${AWS_ENDPOINT_URL}
+
+      # Backup Settings
+      - MAX_RETRIES=${MAX_RETRIES:-1}
+      - RETRY_DELAY=${RETRY_DELAY:-0}
+      - RATE_LIMIT_DELAY=${RATE_LIMIT_DELAY:-0}
       - CLEANUP_LOCAL_FILES=${CLEANUP_LOCAL_FILES:-false}
+      - LOCIZE_CLI_TIMEOUT=${LOCIZE_CLI_TIMEOUT:-30}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
 
     # Volume mounts for local development and testing
     volumes:
@@ -52,6 +71,10 @@ services:
       - "com.docker.compose.service=backup"
       - "maintainer=ligouras"
       - "version=${LOCIZE_CLI_VERSION:-10.3.2}"
+
+    # Network configuration to connect to MinIO
+    networks:
+      - default
 
   # Optional: MinIO for local S3 testing
   minio:
