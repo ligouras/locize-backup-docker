@@ -2,11 +2,14 @@
 # Uses ligouras/locize-cli with version pinning for enhanced functionality
 
 # Build arguments for version pinning and metadata
-ARG LOCIZE_CLI_VERSION=10.3.1
-ARG BUILD_DATE
-ARG VCS_REF
+ARG LOCIZE_CLI_VERSION
 
 FROM ligouras/locize-cli:${LOCIZE_CLI_VERSION}
+
+# Build arguments for metadata labels (after FROM to ensure they're available)
+ARG LOCIZE_CLI_VERSION
+ARG BUILD_DATE="unknown"
+ARG VCS_REF="unknown"
 
 # Set OCI-compliant metadata labels
 LABEL org.opencontainers.image.title="locize-backup"
@@ -41,7 +44,6 @@ RUN mkdir -p /app/backup/data && \
 
 # Copy the enhanced backup script
 COPY --chown=locize:nodejs backup.sh /app/backup/
-COPY --chown=locize:nodejs .env.example /app/backup/
 
 # Make script executable
 RUN chmod +x /app/backup/backup.sh

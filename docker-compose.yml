@@ -7,8 +7,8 @@ services:
       args:
         BUILD_DATE: ${BUILD_DATE:-}
         VCS_REF: ${VCS_REF:-}
-        LOCIZE_CLI_VERSION: ${LOCIZE_CLI_VERSION:-10.3.1}
-    image: ligouras/locize-backup:${TAG:-10.3.1}
+        LOCIZE_CLI_VERSION: ${LOCIZE_CLI_VERSION:-10.3.2}
+    image: ligouras/locize-backup:latest
     container_name: locize-backup-dev
 
     # Additional environment variables for development
@@ -51,7 +51,7 @@ services:
       - "com.docker.compose.project=locize-backup"
       - "com.docker.compose.service=backup"
       - "maintainer=ligouras"
-      - "version=${LOCIZE_CLI_VERSION:-10.3.1}"
+      - "version=${LOCIZE_CLI_VERSION:-10.3.2}"
 
   # Optional: MinIO for local S3 testing
   minio:
