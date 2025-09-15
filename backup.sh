@@ -17,10 +17,8 @@ LANGUAGES="${LOCIZE_LANGUAGES:-en,fr,de,ja,ko,zh}"
 NAMESPACES="${LOCIZE_NAMESPACES:-frontend,backend-templates,configurations-schemes,configurations-forms}"
 VERSION="${LOCIZE_VERSION:-latest}"
 S3_BUCKET="${S3_BUCKET_NAME:-}"
-S3_PREFIX="${S3_PREFIX:-locize-backups}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
-LOCAL_BACKUP_PATH="${LOCAL_BACKUP_PATH:-/app/backup/data}"
-BACKUP_DIR="${BACKUP_DIR:-${LOCAL_BACKUP_PATH}}"
+BACKUP_DIR="/app/backup/data"
 MAX_RETRIES="${MAX_RETRIES:-3}"
 RETRY_DELAY="${RETRY_DELAY:-5}"
 RATE_LIMIT_DELAY="${RATE_LIMIT_DELAY:-1}"
@@ -148,7 +146,7 @@ validate_config() {
             errors+=("AWS_SECRET_ACCESS_KEY is required when AWS_ACCESS_KEY_ID is set")
         fi
 
-        log_info "S3 storage configured: s3://$S3_BUCKET/$S3_PREFIX"
+        log_info "S3 storage configured: s3://$S3_BUCKET"
         if [[ -n "$AWS_ACCESS_KEY_ID" ]]; then
             log_debug "Using AWS Access Key ID: ${AWS_ACCESS_KEY_ID:0:8}..."
         elif [[ -n "$AWS_PROFILE" ]]; then
@@ -157,7 +155,7 @@ validate_config() {
             log_debug "Using IAM role or instance profile for AWS authentication"
         fi
     else
-        log_info "Local storage configured: $LOCAL_BACKUP_PATH"
+        log_info "Local storage configured: $BACKUP_DIR"
         # Ensure CLEANUP_LOCAL_FILES is false when using local storage only
         if [[ "$CLEANUP_LOCAL_FILES" == "true" ]]; then
             log_warn "CLEANUP_LOCAL_FILES is set to true but using local storage - setting to false"
@@ -370,7 +368,7 @@ process_combination() {
 
     # Upload to S3 if configured
     if [[ "$USE_S3" == "true" ]]; then
-        local s3_key="$S3_PREFIX/$(date -u '+%Y/%m/%d')/$filename"
+        local s3_key="$(date -u '+%Y/%m/%d')/$filename"
         if ! upload_to_s3 "$local_file" "$s3_key"; then
             log_error "Failed to upload: $language/$namespace"
             return 1
@@ -411,9 +409,9 @@ run_backup() {
     log_info "Namespaces: ${ns_array[*]}"
     log_info "Total combinations: $total_combinations"
     if [[ "$USE_S3" == "true" ]]; then
-        log_info "Storage: S3 bucket s3://$S3_BUCKET/$S3_PREFIX"
+        log_info "Storage: S3 bucket s3://$S3_BUCKET"
     else
-        log_info "Storage: Local directory $LOCAL_BACKUP_PATH"
+        log_info "Storage: Local directory $BACKUP_DIR"
     fi
 
     # Process all combinations
@@ -485,7 +483,6 @@ create_summary_report() {
   "failed_combinations": $(printf '%s\n' "${failed_combinations[@]}" | jq -R . | jq -s . 2>/dev/null || echo "[]"),
   "storage_type": "s3",
   "s3_bucket": "$S3_BUCKET",
-  "s3_prefix": "$S3_PREFIX",
   "backup_method": "locize-cli",
   "cli_version": "$(locize --version 2>/dev/null || echo 'unknown')"
 }
@@ -503,7 +500,7 @@ EOF
   "success_rate": $(echo "scale=2; $successful * 100 / $total" | bc -l 2>/dev/null || echo "0"),
   "failed_combinations": $(printf '%s\n' "${failed_combinations[@]}" | jq -R . | jq -s . 2>/dev/null || echo "[]"),
   "storage_type": "local",
-  "local_backup_path": "$LOCAL_BACKUP_PATH",
+  "local_backup_path": "$BACKUP_DIR",
   "backup_method": "locize-cli",
   "cli_version": "$(locize --version 2>/dev/null || echo 'unknown')"
 }
@@ -512,7 +509,7 @@ EOF
 
     # Upload summary to S3 if using S3 storage
     if [[ "$USE_S3" == "true" ]]; then
-        local s3_summary_key="$S3_PREFIX/summaries/backup-summary-$timestamp.json"
+        local s3_summary_key="summaries/backup-summary-$timestamp.json"
         if upload_to_s3 "$summary_file" "$s3_summary_key"; then
             log_success "Summary report uploaded: s3://$S3_BUCKET/$s3_summary_key"
         else

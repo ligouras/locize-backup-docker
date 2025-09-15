@@ -37,8 +37,8 @@ RUN apk add --no-cache \
     && rm -rf /var/cache/apk/*
 
 # Create backup-specific directories and ensure proper ownership
-RUN mkdir -p /app/backup /tmp/locize-backup && \
-    chown -R locize:nodejs /app/backup /tmp/locize-backup
+RUN mkdir -p /app/backup/data && \
+    chown -R locize:nodejs /app/backup
 
 # Copy the enhanced backup script
 COPY --chown=locize:nodejs backup.sh /app/backup/
@@ -54,7 +54,6 @@ WORKDIR /app/backup
 USER locize
 
 # Set default environment variables for backup functionality
-ENV BACKUP_DIR=/tmp/locize-backup
 ENV LOG_LEVEL=INFO
 ENV CLEANUP_LOCAL_FILES=true
 ENV MAX_RETRIES=3
