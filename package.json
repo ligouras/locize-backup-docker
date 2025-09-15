@@ -13,7 +13,7 @@
     "shell": "docker run --rm -it --entrypoint bash ligouras/locize-backup",
     "test": "./tests/integration/test-backup-functionality.sh",
     "test:local": "docker compose --env-file .env.local run --rm -v $(pwd)/backup-data:/app/backup/data locize-backup",
-    "test:minio": "npm run minio:start && sleep 5 && docker compose --env-file .env.minio run --rm locize-backup",
+    "test:minio": "docker compose --env-file .env.minio run --rm locize-backup",
     "test:smoke": "docker run --rm --entrypoint locize ligouras/locize-backup --version",
     "lint": "docker run --rm -i hadolint/hadolint < Dockerfile || echo 'Hadolint not available' && find . -name '*.sh' -exec shellcheck {} + || echo 'Shellcheck not available'",
     "clean": "docker rmi ligouras/locize-backup || true && docker system prune -f",
