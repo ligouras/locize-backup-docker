@@ -1,12 +1,44 @@
-# Locize Backup Solution
+# Locize Backup Docker Image
 
 [![Production Ready](https://img.shields.io/badge/status-production%20ready-green.svg)](https://github.com/ligouras/locize/tree/main/docker-backup)
 [![Docker](https://img.shields.io/badge/docker-supported-blue.svg)](Dockerfile)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Docker-based backup solution for Locize i18n projects using the official [`locize-cli`](https://github.com/locize/locize-cli). Supports local storage and AWS S3 with monitoring and reliability features.
+A production-ready Docker image for automated backup of Locize i18n projects using the official [locize-cli](https://github.com/locize/locize-cli). Supports local storage and AWS S3 with monitoring and reliability features.
 
-## 🚀 Quick Start
+## Why Use This Docker Image?
 
+### Benefits
+- **Reliable Backups**: Native locize-cli integration with retry logic and error handling
+- **Flexible Storage**: Support for local filesystem and AWS S3 storage options
+- **Smart Scheduling**: 24-hour backup frequency control with force override capability
+- **Secure**: Non-root execution with minimal dependencies
+- **Portable**: Works with Docker, Docker Compose, Kubernetes, and cron scheduling
+- **Monitored**: Detailed logging and summary reports for backup operations
+
+### Perfect For
+- **Automated Backups**: Schedule regular backups of your Locize translation projects
+- **CI/CD Integration**: Include backup operations in your deployment pipelines
+- **Disaster Recovery**: Maintain reliable backups with configurable storage options
+- **Multi-Environment**: Consistent backup behavior across development and production
+
+## Installation
+
+### Option 1: Docker Hub (Recommended)
+```bash
+docker pull ligouras/locize-backup:latest
+```
+
+### Option 2: Build Locally
+```bash
+git clone https://github.com/ligouras/locize.git
+cd locize/docker-backup
+npm run build
+```
+
+## Quick Start
+
+### Basic Setup
 ```bash
 # Clone and setup
 git clone https://github.com/ligouras/locize.git
@@ -18,51 +50,21 @@ cp .env.example .env
 docker compose up --build
 ```
 
-## 📋 Key Features
-
-- **🔧 Reliable**: Native [`locize-cli`](backup.sh) integration with retry logic
-- **🔒 Secure**: Non-root execution, minimal dependencies
-- **⚡ Flexible**: Local or S3 storage with automatic cleanup
-- **📊 Monitored**: Detailed logging and summary reports
-- **🐳 Portable**: Docker, Kubernetes, Docker Swarm support
-- **⏰ Smart**: 24-hour backup frequency control with force override
-
-## 🛠️ Configuration
-
-### Required Settings
+### Basic Commands
 ```bash
-LOCIZE_PROJECT_ID=your-project-id        # Required
-LOCIZE_API_KEY=your-api-key              # Optional (for private projects)
-
-# For S3 storage (optional)
-S3_BUCKET_NAME=your-backup-bucket
-AWS_REGION=us-east-1
-AWS_ACCESS_KEY_ID=your-access-key
-AWS_SECRET_ACCESS_KEY=your-secret-key
-```
-
-### Optional Settings
-```bash
-LOCIZE_VERSION=latest                    # Default: latest
-LOCIZE_LANGUAGES=en,fr,de                # Default: en,fr,de,ja,ko,zh
-MAX_RETRIES=3                            # Default: 3
-LOG_LEVEL=INFO                           # DEBUG, INFO, WARN, ERROR
-```
-
-See [`.env.example`](.env.example) for complete configuration reference.
-
-## 📖 Usage
-
-### Docker
-```bash
-# Basic usage
+# Run backup with environment file
 docker run --rm --env-file .env ligouras/locize-backup:latest
 
 # Force backup (ignore 24-hour check)
 docker run --rm --env-file .env ligouras/locize-backup:latest --force
+
+# Check version
+docker run --rm ligouras/locize-backup:latest bash -c "locize --version"
 ```
 
-### Docker Compose
+## Common Use Cases
+
+### 1. Docker Compose Deployment
 ```yaml
 services:
   locize-backup:
@@ -72,7 +74,7 @@ services:
       - ./backup-data:/app/backup/data
 ```
 
-### Kubernetes CronJob
+### 2. Kubernetes CronJob
 ```yaml
 apiVersion: batch/v1
 kind: CronJob
@@ -92,14 +94,53 @@ spec:
                 name: locize-backup-config
 ```
 
-### Cron Scheduling
+### 3. Cron Scheduling
 ```bash
 # Daily at 2 AM
 0 2 * * * docker run --rm --env-file .env ligouras/locize-backup:latest
 ```
 
-## 📁 Output Structure
+### 4. S3 Storage Configuration
+```bash
+# Required for S3 storage
+docker run --rm \
+  -e LOCIZE_PROJECT_ID=your-project-id \
+  -e S3_BUCKET_NAME=your-backup-bucket \
+  -e AWS_REGION=us-east-1 \
+  -e AWS_ACCESS_KEY_ID=your-access-key \
+  -e AWS_SECRET_ACCESS_KEY=your-secret-key \
+  ligouras/locize-backup:latest
+```
 
+## Available npm Scripts
+
+For local development and testing:
+
+```bash
+npm run build              # Build Docker image
+npm run test               # Run integration tests
+npm run test:local         # Local testing
+npm run test:minio         # S3 testing with MinIO
+npm run minio:start        # Start MinIO for testing
+npm run minio:console      # Access MinIO console (http://localhost:9001)
+npm run minio:stop         # Stop MinIO
+npm run lint               # Lint scripts
+npm run help               # Show all commands
+```
+
+## Image Details
+
+### Base Image
+- **Base**: `ligouras/locize-cli:10.3.2` (includes locize-cli and dependencies)
+- **Size**: Optimized for production use
+- **Platforms**: `linux/amd64`, `linux/arm64`
+
+### Security Features
+- **Non-root user**: Runs as user with UID 1001
+- **Minimal surface**: Only essential packages included
+- **Secure defaults**: Safe configuration options
+
+### Output Structure
 ```
 ./backup-data/
 ├── 2024/01/15/
@@ -109,67 +150,34 @@ spec:
     └── backup-summary-20240115-120000.json
 ```
 
-## 🧪 Testing
+## Environment Variables
 
-```bash
-# Local testing
-npm run test:local
+| Variable | Description | Default | Example |
+|----------|-------------|---------|---------|
+| `LOCIZE_PROJECT_ID` | Your locize project ID (required) | - | `abc123def-456-789` |
+| `LOCIZE_API_KEY` | Your locize API key (optional for public projects) | - | `your-secret-api-key` |
+| `LOCIZE_VERSION` | Specific version to backup | `latest` | `latest` or `production` |
+| `LOCIZE_LANGUAGES` | Languages to backup | `en,fr,de,ja,ko,zh` | `en,fr,de` |
+| `S3_BUCKET_NAME` | S3 bucket for backups (optional) | - | `my-backup-bucket` |
+| `AWS_REGION` | AWS region for S3 | `us-east-1` | `us-east-1` |
+| `AWS_ACCESS_KEY_ID` | AWS access key for S3 | - | `AKIAIOSFODNN7EXAMPLE` |
+| `AWS_SECRET_ACCESS_KEY` | AWS secret key for S3 | - | `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY` |
+| `MAX_RETRIES` | Maximum retry attempts | `3` | `3` |
+| `LOG_LEVEL` | Logging level | `INFO` | `DEBUG`, `INFO`, `WARN`, `ERROR` |
 
-# S3 testing with MinIO
-npm run minio:start
-npm run test:minio
-npm run minio:console  # http://localhost:9001
-npm run minio:stop
-```
+See [`.env.example`](.env.example) for complete configuration reference.
 
-## 🔧 Development
+## Requirements
 
-```bash
-npm run build              # Build Docker image
-npm run test               # Run integration tests
-npm run lint               # Lint scripts
-npm run help               # Show all commands
-```
+- **Docker**: 20.0.0 or higher
+- **For local builds**: Node.js 14.0.0 or higher (for npm scripts)
+- **For S3 storage**: Valid AWS credentials and S3 bucket
+- **For development**: Git, Docker Buildx
 
-## 🐛 Troubleshooting
+## Related Projects
 
-### Common Issues
-
-**Missing Dependencies**
-```
-[ERROR] Missing required dependencies: locize
-```
-*Solution*: Use correct base image `ligouras/locize-cli:latest`
-
-**Configuration Errors**
-```
-[ERROR] LOCIZE_PROJECT_ID is required
-```
-*Solution*: Set required environment variables in `.env`
-
-**API Access Issues**
-```
-[WARN] locize-cli download failed
-```
-*Solution*: Check project ID, API key, and network connectivity
-
-### Debug Commands
-```bash
-# Test container health
-docker run --rm ligouras/locize-backup:latest bash -c "locize --version"
-
-# Debug logging
-docker run --rm -e LOG_LEVEL=DEBUG --env-file .env ligouras/locize-backup:latest
-
-# Interactive debugging
-docker run --rm -it --env-file .env ligouras/locize-backup:latest bash
-```
-
-## 📚 Architecture
-
-- **Base**: [`ligouras/locize-cli:10.3.2`](https://hub.docker.com/r/ligouras/locize-cli)
-- **Security**: Non-root execution (UID 1001)
-- **Key Files**: [`Dockerfile`](Dockerfile), [`backup.sh`](backup.sh), [`.env.example`](.env.example)
+- **[locize-cli](https://github.com/locize/locize-cli)** - The official CLI tool for locize
+- **[docker-cli](../docker-cli/)** - Docker image for locize-cli
 
 ---
 

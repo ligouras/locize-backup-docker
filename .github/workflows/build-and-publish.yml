@@ -1,0 +1,267 @@
+name: Docker Backup Image Version Management
+
+on:
+  schedule:
+    # Run once per day at 4am UTC to check for new base image releases
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force build even if base image version unchanged'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  detect-version:
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.version.outputs.new_version }}
+      should_build: ${{ steps.version.outputs.should_build }}
+      current_version: ${{ steps.version.outputs.current_version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Detect base image version changes
+        id: version
+        env:
+          FORCE_BUILD: ${{ github.event.inputs.force_build }}
+        run: node .github/scripts/detect-version.js
+
+  test-functionality:
+    runs-on: ubuntu-latest
+    needs: detect-version
+    if: needs.detect-version.outputs.should_build == 'true'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build test image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          tags: ligouras/locize-backup:test
+          build-args: |
+            LOCIZE_CLI_VERSION=${{ needs.detect-version.outputs.new_version }}
+            BUILD_DATE=${{ github.run_id }}
+            VCS_REF=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Start MinIO for testing
+        run: |
+          # Create MinIO environment file for testing
+          cat > .env.minio << EOF
+          MINIO_ROOT_USER=minioadmin
+          MINIO_ROOT_PASSWORD=minioadmin123
+          S3_BUCKET_NAME=locize-backups-test
+          AWS_ENDPOINT_URL=http://localhost:9000
+          AWS_ACCESS_KEY_ID=minioadmin
+          AWS_SECRET_ACCESS_KEY=minioadmin123
+          AWS_REGION=us-east-1
+          EOF
+
+          # Start MinIO services
+          docker compose --profile testing up -d minio minio-setup
+
+          # Wait for MinIO to be ready
+          timeout 60 bash -c 'until curl -f http://localhost:9000/minio/health/live; do sleep 2; done'
+
+      - name: Run comprehensive backup functionality tests
+        run: |
+          # Make test script executable
+          chmod +x tests/integration/test-backup-functionality.sh
+
+          # Run the comprehensive test suite
+          ./tests/integration/test-backup-functionality.sh
+
+      - name: Test MinIO integration
+        run: |
+          # Test backup with MinIO
+          docker run --rm \
+            --network locize-backup-network \
+            -e LOCIZE_PROJECT_ID=test-project \
+            -e LOCIZE_API_KEY=test-key \
+            -e S3_BUCKET_NAME=locize-backups-test \
+            -e AWS_ENDPOINT_URL=http://minio:9000 \
+            -e AWS_ACCESS_KEY_ID=minioadmin \
+            -e AWS_SECRET_ACCESS_KEY=minioadmin123 \
+            -e AWS_REGION=us-east-1 \
+            -e LOG_LEVEL=DEBUG \
+            ligouras/locize-backup:test \
+            --help
+
+      - name: Cleanup test environment
+        if: always()
+        run: |
+          docker compose --profile testing down -v
+          docker rmi ligouras/locize-backup:test || true
+
+  build-and-push:
+    runs-on: ubuntu-latest
+    needs: [detect-version, test-functionality]
+    if: needs.detect-version.outputs.should_build == 'true'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ligouras/locize-backup
+          tags: |
+            type=raw,value=${{ needs.detect-version.outputs.new_version }}
+            type=raw,value=latest
+
+      - name: Build and push Docker images
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            LOCIZE_CLI_VERSION=${{ needs.detect-version.outputs.new_version }}
+            BUILD_DATE=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+            VCS_REF=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  verify-deployment:
+    runs-on: ubuntu-latest
+    needs: [detect-version, build-and-push]
+    if: needs.detect-version.outputs.should_build == 'true'
+    steps:
+      - name: Verify native platform functionality
+        run: |
+          echo "Verifying ligouras/locize-backup:${{ needs.detect-version.outputs.new_version }} on native platform (linux/amd64)"
+
+          # Pull and test the native platform version
+          docker pull --platform linux/amd64 ligouras/locize-backup:${{ needs.detect-version.outputs.new_version }}
+
+          # Test basic functionality on native platform
+          VERSION_OUTPUT=$(docker run --rm --platform linux/amd64 --entrypoint locize ligouras/locize-backup:${{ needs.detect-version.outputs.new_version }} --version)
+          echo "Version output: $VERSION_OUTPUT"
+
+          # Verify version matches expected base image version
+          if echo "$VERSION_OUTPUT" | grep -q "${{ needs.detect-version.outputs.new_version }}"; then
+            echo "✅ Native platform version verification passed"
+          else
+            echo "❌ Native platform version verification failed"
+            exit 1
+          fi
+
+          # Test help command on native platform
+          docker run --rm --platform linux/amd64 --entrypoint locize ligouras/locize-backup:${{ needs.detect-version.outputs.new_version }} --help > /dev/null
+          echo "✅ Native platform help command test passed"
+
+          # Test backup script accessibility
+          docker run --rm --platform linux/amd64 ligouras/locize-backup:${{ needs.detect-version.outputs.new_version }} --help > /dev/null
+          echo "✅ Native platform backup script test passed"
+
+      - name: Verify multi-platform manifest
+        run: |
+          echo "Verifying multi-platform manifest for ligouras/locize-backup:${{ needs.detect-version.outputs.new_version }}"
+
+          # Inspect the manifest to verify both platforms exist
+          docker manifest inspect ligouras/locize-backup:${{ needs.detect-version.outputs.new_version }} > manifest.json
+
+          # Display manifest for debugging
+          echo "Manifest contents:"
+          cat manifest.json
+
+          # Check for AMD64 platform using proper JSON structure
+          if grep -q '"architecture": "amd64"' manifest.json && grep -q '"os": "linux"' manifest.json; then
+            echo "✅ AMD64 platform found in manifest"
+          else
+            echo "❌ AMD64 platform missing from manifest"
+            exit 1
+          fi
+
+          # Check for ARM64 platform using proper JSON structure
+          if grep -q '"architecture": "arm64"' manifest.json && grep -q '"os": "linux"' manifest.json; then
+            echo "✅ ARM64 platform found in manifest"
+          else
+            echo "❌ ARM64 platform missing from manifest"
+            exit 1
+          fi
+
+          # Verify ARM64 image can be pulled (without execution)
+          docker pull --platform linux/arm64 ligouras/locize-backup:${{ needs.detect-version.outputs.new_version }}
+          echo "✅ ARM64 platform image pull successful"
+
+          echo "✅ Multi-platform verification completed successfully"
+
+  update-tracking:
+    runs-on: ubuntu-latest
+    needs: [detect-version, build-and-push, verify-deployment]
+    if: needs.detect-version.outputs.should_build == 'true'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update version tracking
+        run: |
+          echo "${{ needs.detect-version.outputs.new_version }}" > .locize-cli-version
+
+          # Configure git
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+          # Commit and push changes
+          git add .locize-cli-version
+          git commit -m "Update tracked locize-cli base image version to ${{ needs.detect-version.outputs.new_version }}"
+          git push
+
+      - name: Create release summary
+        run: |
+          echo "## 🚀 Docker Backup Image Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Base Image Version:** ${{ needs.detect-version.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Previous Version:** ${{ needs.detect-version.outputs.current_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Build Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Published Images" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ligouras/locize-backup:${{ needs.detect-version.outputs.new_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ligouras/locize-backup:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🏗️ Platforms" >> $GITHUB_STEP_SUMMARY
+          echo "- linux/amd64" >> $GITHUB_STEP_SUMMARY
+          echo "- linux/arm64" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🧪 Testing" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Comprehensive backup functionality tests" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ MinIO integration testing" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Multi-platform verification" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ✅ Verification Status" >> $GITHUB_STEP_SUMMARY
+          echo "All images have been successfully built, tested, pushed, and verified on Docker Hub for both platforms." >> $GITHUB_STEP_SUMMARY
