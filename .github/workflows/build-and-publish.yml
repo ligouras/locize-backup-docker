@@ -1,4 +1,4 @@
-name: Docker Backup Image Version Management
+name: Docker Image Version Management
 
 on:
   schedule:
