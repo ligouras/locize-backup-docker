@@ -163,10 +163,23 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
 
-          # Commit and push changes
+          # Check if there are changes to commit
           git add .locize-cli-version
-          git commit -m "Update tracked locize-cli base image version to ${{ needs.detect-version.outputs.new_version }}"
-          git push
+
+          if git diff --cached --quiet; then
+            echo "ℹ️ No changes detected - version file already up to date with ${{ needs.detect-version.outputs.new_version }}"
+            echo "VERSION_ALREADY_UPDATED=true" >> $GITHUB_ENV
+          else
+            echo "📝 Committing version update to ${{ needs.detect-version.outputs.new_version }}"
+            if git commit -m "Update tracked locize-cli base image version to ${{ needs.detect-version.outputs.new_version }}"; then
+              git push
+              echo "✅ Version tracking updated successfully"
+              echo "VERSION_ALREADY_UPDATED=false" >> $GITHUB_ENV
+            else
+              echo "⚠️ Git commit failed, but continuing with release summary"
+              echo "VERSION_ALREADY_UPDATED=true" >> $GITHUB_ENV
+            fi
+          fi
 
       - name: Create release summary
         run: |
@@ -176,6 +189,17 @@ jobs:
           echo "**Previous Version:** ${{ needs.detect-version.outputs.current_version }}" >> $GITHUB_STEP_SUMMARY
           echo "**Build Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Add version tracking status
+          if [ "${VERSION_ALREADY_UPDATED:-false}" = "true" ]; then
+            echo "### 📋 Version Tracking Status" >> $GITHUB_STEP_SUMMARY
+            echo "ℹ️ Version file was already up to date - no commit needed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### 📋 Version Tracking Status" >> $GITHUB_STEP_SUMMARY
+            echo "✅ Version tracking file updated and committed" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+
           echo "### 📦 Published Images" >> $GITHUB_STEP_SUMMARY
           echo "- \`ligouras/locize-backup:${{ needs.detect-version.outputs.new_version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`ligouras/locize-backup:latest\`" >> $GITHUB_STEP_SUMMARY
@@ -183,9 +207,6 @@ jobs:
           echo "### 🏗️ Platforms" >> $GITHUB_STEP_SUMMARY
           echo "- linux/amd64" >> $GITHUB_STEP_SUMMARY
           echo "- linux/arm64" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### ✅ Multi-platform verification" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Multi-platform verification" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### ✅ Verification Status" >> $GITHUB_STEP_SUMMARY
           echo "All images have been successfully built, pushed, and verified on Docker Hub for both platforms." >> $GITHUB_STEP_SUMMARY
