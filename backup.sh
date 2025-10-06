@@ -431,6 +431,14 @@ upload_to_s3() {
     while [[ $attempt -le $MAX_RETRIES ]]; do
         log_debug "S3 upload attempt $attempt/$MAX_RETRIES for $(basename "$s3_key")"
 
+        # Ensure AWS credentials are exported when using access keys
+        if [[ -n "${AWS_ACCESS_KEY_ID:-}" ]]; then
+            export AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID"
+            export AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY"
+            # Unset AWS_PROFILE to prevent profile lookup when using access keys
+            unset AWS_PROFILE
+        fi
+
         # Build AWS CLI command with optional endpoint URL for MinIO
         local aws_cmd=(aws s3 cp "$local_file" "s3://$S3_BUCKET/$s3_key")
         aws_cmd+=(--region "$AWS_REGION")
@@ -441,15 +449,13 @@ upload_to_s3() {
         fi
 
         aws_cmd+=(--metadata "source=locize-backup-cli,timestamp=$(date -u +%s),version=$VERSION")
-        aws_cmd+=(--quiet)
 
         # Add endpoint URL if specified (for MinIO testing)
         if [[ -n "${AWS_ENDPOINT_URL:-}" ]]; then
             aws_cmd+=(--endpoint-url "$AWS_ENDPOINT_URL")
         fi
 
-        if "${aws_cmd[@]}"; then
-
+        if "${aws_cmd[@]}" 2>&1; then
             log_debug "Uploaded to S3: $(basename "$s3_key")"
             return 0
         else
