@@ -8,6 +8,7 @@ set -euo pipefail
 
 FORCE_BACKUP="false"
 NO_SUMMARY="false"
+FLAT_STRUCTURE="false"
 
 # Parse command line arguments
 parse_arguments() {
@@ -21,6 +22,11 @@ parse_arguments() {
             --no-summary)
                 NO_SUMMARY="true"
                 log_info "Summary report creation disabled"
+                shift
+                ;;
+            --flat-structure)
+                FLAT_STRUCTURE="true"
+                log_info "Flat structure mode enabled (no date folders)"
                 shift
                 ;;
             -h|--help)
@@ -44,9 +50,10 @@ Locize i18n Backup Script
 Usage: $0 [OPTIONS]
 
 OPTIONS:
-    --force        Force backup even if one was run within the last 24 hours
-    --no-summary   Skip creation of the summary report
-    -h, --help     Show this help message
+    --force            Force backup even if one was run within the last 24 hours
+    --no-summary       Skip creation of the summary report
+    --flat-structure   Store files in flat structure (no YYYY/MM/DD folders)
+    -h, --help         Show this help message
 
 DESCRIPTION:
     This script downloads internationalization files using locize-cli and
@@ -54,9 +61,10 @@ DESCRIPTION:
     was already performed within the last 24 hours.
 
 EXAMPLES:
-    $0                   # Run backup (skip if run within 24 hours)
-    $0 --force           # Force backup regardless of timing
-    $0 --no-summary      # Run backup without creating summary report
+    $0                      # Run backup (skip if run within 24 hours)
+    $0 --force              # Force backup regardless of timing
+    $0 --no-summary         # Run backup without creating summary report
+    $0 --flat-structure     # Store files without date-based folders
 EOF
 }
 
@@ -219,20 +227,29 @@ validate_config() {
     log_debug "Configuration validation passed"
 }
 
-# Create backup directory with legacy structure
+# Create backup directory structure
 setup_backup_dir() {
     if [[ ! -d "$BACKUP_DIR" ]]; then
         mkdir -p "$BACKUP_DIR"
         log_debug "Created backup directory: $BACKUP_DIR"
     fi
 
-    # Create subdirectories for organization matching legacy structure: YYYY/MM/DD
-    local date_path=$(date -u '+%Y/%m/%d')
-    local daily_dir="$BACKUP_DIR/$date_path"
+    local backup_dir
 
-    if [[ ! -d "$daily_dir" ]]; then
-        mkdir -p "$daily_dir"
-        log_debug "Created daily backup directory: $daily_dir"
+    # Create subdirectories based on structure preference
+    if [[ "$FLAT_STRUCTURE" == "true" ]]; then
+        # Flat structure: store directly in BACKUP_DIR
+        backup_dir="$BACKUP_DIR"
+        log_debug "Using flat structure: $backup_dir"
+    else
+        # Date-based structure: YYYY/MM/DD
+        local date_path=$(date -u '+%Y/%m/%d')
+        backup_dir="$BACKUP_DIR/$date_path"
+
+        if [[ ! -d "$backup_dir" ]]; then
+            mkdir -p "$backup_dir"
+            log_debug "Created daily backup directory: $backup_dir"
+        fi
     fi
 
     # Create summaries directory only if summary reports are enabled
@@ -244,7 +261,7 @@ setup_backup_dir() {
         fi
     fi
 
-    echo "$daily_dir"
+    echo "$backup_dir"
 }
 
 # Validate JSON content
@@ -507,7 +524,14 @@ process_combination() {
 
     # Upload to S3 if configured
     if [[ "$USE_S3" == "true" ]]; then
-        local s3_key="$(date -u '+%Y/%m/%d')/$filename"
+        # Construct S3 key based on structure preference
+        local s3_key
+        if [[ "$FLAT_STRUCTURE" == "true" ]]; then
+            s3_key="$filename"
+        else
+            s3_key="$(date -u '+%Y/%m/%d')/$filename"
+        fi
+
         if ! upload_to_s3 "$local_file" "$s3_key"; then
             log_error "Failed to upload: $language/$namespace"
             return 1
@@ -666,8 +690,9 @@ EOF
 
 # Upload existing backup files to S3
 upload_existing_backups() {
-    local daily_dir=""
+    local backup_dir=""
     local timestamp=""
+    local s3_prefix=""
 
     # Try to find the most recent summary file to get the timestamp
     local summaries_dir="$BACKUP_DIR/summaries"
@@ -684,33 +709,48 @@ upload_existing_backups() {
         if [[ -n "$timestamp" ]]; then
             log_info "Found recent backup with timestamp: $timestamp"
 
-            # Extract backup date from summary timestamp to locate the backup directory
-            local backup_date="${timestamp:0:8}"
-            local formatted_date="${backup_date:0:4}/${backup_date:4:2}/${backup_date:6:2}"
-            daily_dir="$BACKUP_DIR/$formatted_date"
+            if [[ "$FLAT_STRUCTURE" == "true" ]]; then
+                # Flat structure: files are in BACKUP_DIR
+                backup_dir="$BACKUP_DIR"
+                s3_prefix=""
+            else
+                # Date-based structure: extract date from timestamp
+                local backup_date="${timestamp:0:8}"
+                local formatted_date="${backup_date:0:4}/${backup_date:4:2}/${backup_date:6:2}"
+                backup_dir="$BACKUP_DIR/$formatted_date"
+                s3_prefix="$formatted_date/"
+            fi
         fi
     fi
 
-    # If no summary found or timestamp extraction failed, use today's date
-    if [[ -z "$daily_dir" ]]; then
-        log_info "No summary file found, using today's date to locate backup directory"
-        daily_dir="$BACKUP_DIR/$(date -u '+%Y/%m/%d')"
+    # If no summary found or timestamp extraction failed, determine directory based on structure
+    if [[ -z "$backup_dir" ]]; then
+        log_info "No summary file found, determining backup directory based on structure"
+
+        if [[ "$FLAT_STRUCTURE" == "true" ]]; then
+            backup_dir="$BACKUP_DIR"
+            s3_prefix=""
+        else
+            backup_dir="$BACKUP_DIR/$(date -u '+%Y/%m/%d')"
+            s3_prefix="$(date -u '+%Y/%m/%d')/"
+        fi
+
         timestamp=$(date -u '+%Y%m%d-%H%M%S')
     fi
 
-    if [[ ! -d "$daily_dir" ]]; then
-        log_error "Backup directory not found: $daily_dir"
+    if [[ ! -d "$backup_dir" ]]; then
+        log_error "Backup directory not found: $backup_dir"
         exit 1
     fi
 
-    log_info "Uploading existing backup files from: $daily_dir"
+    log_info "Uploading existing backup files from: $backup_dir"
 
     # Find all backup files (without timestamp in filename)
     local backup_files
-    backup_files=$(find "$daily_dir" -name "i18n-*.json" -type f 2>/dev/null)
+    backup_files=$(find "$backup_dir" -maxdepth 1 -name "i18n-*.json" -type f 2>/dev/null)
 
     if [[ -z "$backup_files" ]]; then
-        log_error "No backup files found in directory: $daily_dir"
+        log_error "No backup files found in directory: $backup_dir"
         exit 1
     fi
 
@@ -722,7 +762,7 @@ upload_existing_backups() {
     while IFS= read -r local_file; do
         if [[ -f "$local_file" ]]; then
             local filename=$(basename "$local_file")
-            local s3_key="$formatted_date/$filename"
+            local s3_key="${s3_prefix}${filename}"
 
             total=$((total + 1))
             log_info "Uploading: $(basename "$local_file")"
