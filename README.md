@@ -58,6 +58,12 @@ docker run --rm --env-file .env ligouras/locize-backup:latest
 # Force backup (ignore 24-hour check)
 docker run --rm --env-file .env ligouras/locize-backup:latest --force
 
+# Run without summary report
+docker run --rm --env-file .env ligouras/locize-backup:latest --no-summary
+
+# Use flat structure (no date folders)
+docker run --rm --env-file .env ligouras/locize-backup:latest --flat-structure
+
 # Check version
 docker run --rm ligouras/locize-backup:latest bash -c "locize --version"
 ```
@@ -141,11 +147,22 @@ npm run help               # Show all commands
 - **Secure defaults**: Safe configuration options
 
 ### Output Structure
+
+**Date-based structure (default):**
 ```
 ./backup-data/
 ├── 2024/01/15/
-│   ├── i18n-frontend-en-20240115-120000.json
-│   └── i18n-frontend-fr-20240115-120000.json
+│   ├── i18n-frontend-en.json
+│   └── i18n-frontend-fr.json
+└── summaries/
+    └── backup-summary-20240115-120000.json
+```
+
+**Flat structure (with `--flat-structure` flag):**
+```
+./backup-data/
+├── i18n-frontend-en.json
+├── i18n-frontend-fr.json
 └── summaries/
     └── backup-summary-20240115-120000.json
 ```
@@ -163,6 +180,10 @@ npm run help               # Show all commands
 | `AWS_ACCESS_KEY_ID` | AWS access key for S3 | - | `AKIAIOSFODNN7EXAMPLE` |
 | `AWS_SECRET_ACCESS_KEY` | AWS secret key for S3 | - | `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY` |
 | `MAX_RETRIES` | Maximum retry attempts | `3` | `3` |
+| `RETRY_DELAY` | Delay between retries (seconds) | `5` | `5` |
+| `RATE_LIMIT_DELAY` | Delay between API calls (seconds) | `1` | `1` |
+| `LOCIZE_CLI_TIMEOUT` | Timeout for locize-cli commands (seconds) | `30` | `30` |
+| `CLEANUP_LOCAL_FILES` | Remove local files after S3 upload | `true` | `true`, `false` |
 | `LOG_LEVEL` | Logging level | `INFO` | `DEBUG`, `INFO`, `WARN`, `ERROR` |
 
 See [`.env.example`](.env.example) for complete configuration reference.
