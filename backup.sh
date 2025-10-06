@@ -235,11 +235,13 @@ setup_backup_dir() {
         log_debug "Created daily backup directory: $daily_dir"
     fi
 
-    # Create summaries directory
-    local summaries_dir="$BACKUP_DIR/summaries"
-    if [[ ! -d "$summaries_dir" ]]; then
-        mkdir -p "$summaries_dir"
-        log_debug "Created summaries directory: $summaries_dir"
+    # Create summaries directory only if summary reports are enabled
+    if [[ "$NO_SUMMARY" != "true" ]]; then
+        local summaries_dir="$BACKUP_DIR/summaries"
+        if [[ ! -d "$summaries_dir" ]]; then
+            mkdir -p "$summaries_dir"
+            log_debug "Created summaries directory: $summaries_dir"
+        fi
     fi
 
     echo "$daily_dir"
