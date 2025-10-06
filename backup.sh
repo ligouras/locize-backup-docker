@@ -7,6 +7,7 @@
 set -euo pipefail
 
 FORCE_BACKUP="false"
+NO_SUMMARY="false"
 
 # Parse command line arguments
 parse_arguments() {
@@ -15,6 +16,11 @@ parse_arguments() {
             --force)
                 FORCE_BACKUP="true"
                 log_info "Force backup mode enabled"
+                shift
+                ;;
+            --no-summary)
+                NO_SUMMARY="true"
+                log_info "Summary report creation disabled"
                 shift
                 ;;
             -h|--help)
@@ -38,8 +44,9 @@ Locize i18n Backup Script
 Usage: $0 [OPTIONS]
 
 OPTIONS:
-    --force     Force backup even if one was run within the last 24 hours
-    -h, --help  Show this help message
+    --force        Force backup even if one was run within the last 24 hours
+    --no-summary   Skip creation of the summary report
+    -h, --help     Show this help message
 
 DESCRIPTION:
     This script downloads internationalization files using locize-cli and
@@ -47,8 +54,9 @@ DESCRIPTION:
     was already performed within the last 24 hours.
 
 EXAMPLES:
-    $0                # Run backup (skip if run within 24 hours)
-    $0 --force        # Force backup regardless of timing
+    $0                   # Run backup (skip if run within 24 hours)
+    $0 --force           # Force backup regardless of timing
+    $0 --no-summary      # Run backup without creating summary report
 EOF
 }
 
@@ -568,8 +576,12 @@ run_backup() {
         log_debug "Local backup files cleaned up (summaries preserved)"
     fi
 
-    # Create summary file for monitoring
-    create_summary_report "$timestamp" "$total_combinations" "$successful" "$failed" "${failed_combinations[@]}"
+    # Create summary file for monitoring (unless disabled)
+    if [[ "$NO_SUMMARY" != "true" ]]; then
+        create_summary_report "$timestamp" "$total_combinations" "$successful" "$failed" "${failed_combinations[@]}"
+    else
+        log_info "Summary report creation skipped (--no-summary flag)"
+    fi
 
     # Exit with appropriate code
     if [[ $failed -gt 0 ]]; then
