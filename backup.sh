@@ -491,7 +491,7 @@ process_combination() {
     local daily_dir="$3"
     local timestamp="$4"
 
-    local filename="i18n-$namespace-$language-$timestamp.json"
+    local filename="i18n-$namespace-$language.json"
     local local_file="$daily_dir/$filename"
 
     log_info "Processing: $language/$namespace"
@@ -666,32 +666,37 @@ EOF
 
 # Upload existing backup files to S3
 upload_existing_backups() {
+    local daily_dir=""
+    local timestamp=""
+
+    # Try to find the most recent summary file to get the timestamp
     local summaries_dir="$BACKUP_DIR/summaries"
+    local latest_summary=""
 
-    # Find the most recent summary file to get the timestamp
-    local latest_summary
-    latest_summary=$(find "$summaries_dir" -name "backup-summary-*.json" -type f 2>/dev/null | sort -r | head -1)
-
-    if [[ -z "$latest_summary" || ! -f "$latest_summary" ]]; then
-        log_error "No recent backup summary found - cannot determine which files to upload"
-        exit 1
+    if [[ -d "$summaries_dir" ]]; then
+        latest_summary=$(find "$summaries_dir" -name "backup-summary-*.json" -type f 2>/dev/null | sort -r | head -1)
     fi
 
-    # Extract timestamp from summary filename
-    local timestamp
-    timestamp=$(basename "$latest_summary" | sed 's/backup-summary-\(.*\)\.json/\1/')
+    if [[ -n "$latest_summary" && -f "$latest_summary" ]]; then
+        # Extract timestamp from summary filename
+        timestamp=$(basename "$latest_summary" | sed 's/backup-summary-\(.*\)\.json/\1/')
 
-    if [[ -z "$timestamp" ]]; then
-        log_error "Could not extract timestamp from summary file: $(basename "$latest_summary")"
-        exit 1
+        if [[ -n "$timestamp" ]]; then
+            log_info "Found recent backup with timestamp: $timestamp"
+
+            # Extract backup date from summary timestamp to locate the backup directory
+            local backup_date="${timestamp:0:8}"
+            local formatted_date="${backup_date:0:4}/${backup_date:4:2}/${backup_date:6:2}"
+            daily_dir="$BACKUP_DIR/$formatted_date"
+        fi
     fi
 
-    log_info "Found recent backup with timestamp: $timestamp"
-
-    # Extract backup date from timestamp (format: YYYYMMDD-HHMMSS)
-    local backup_date="${timestamp:0:8}"
-    local formatted_date="${backup_date:0:4}/${backup_date:4:2}/${backup_date:6:2}"
-    local daily_dir="$BACKUP_DIR/$formatted_date"
+    # If no summary found or timestamp extraction failed, use today's date
+    if [[ -z "$daily_dir" ]]; then
+        log_info "No summary file found, using today's date to locate backup directory"
+        daily_dir="$BACKUP_DIR/$(date -u '+%Y/%m/%d')"
+        timestamp=$(date -u '+%Y%m%d-%H%M%S')
+    fi
 
     if [[ ! -d "$daily_dir" ]]; then
         log_error "Backup directory not found: $daily_dir"
@@ -700,12 +705,12 @@ upload_existing_backups() {
 
     log_info "Uploading existing backup files from: $daily_dir"
 
-    # Find all backup files with the matching timestamp
+    # Find all backup files (without timestamp in filename)
     local backup_files
-    backup_files=$(find "$daily_dir" -name "i18n-*-$timestamp.json" -type f 2>/dev/null)
+    backup_files=$(find "$daily_dir" -name "i18n-*.json" -type f 2>/dev/null)
 
     if [[ -z "$backup_files" ]]; then
-        log_error "No backup files found with timestamp: $timestamp"
+        log_error "No backup files found in directory: $daily_dir"
         exit 1
     fi
 
